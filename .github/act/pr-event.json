@@ -1,0 +1,31 @@
+{
+	"action": "created",
+	"issue": {
+		"number": 8434,
+		"pull_request": {
+			"url": "https://api.github.com/repos/cline/cline/pulls/8434"
+		},
+		"title": "Add a command permission system to cline.",
+		"user": {
+			"login": "maxpaulus43"
+		}
+	},
+	"comment": {
+		"id": 2221234567,
+		"body": "/review",
+		"author_association": "OWNER",
+		"user": {
+			"login": "maxpaulus43"
+		}
+	},
+	"repository": {
+		"full_name": "cline/cline",
+		"name": "cline",
+		"owner": {
+			"login": "cline"
+		}
+	},
+	"sender": {
+		"login": "maxpaulus43"
+	}
+}

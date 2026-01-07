@@ -1,0 +1,159 @@
+name: PR Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.issue.pull_request }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/review') &&
+      contains(fromJson('["OWNER","MEMBER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install and Verify Cline CLI
+        run: |
+          npm uninstall -g cline || true
+          npm install -g cline
+          cline version # verify installation
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: Configure Cline with Anthropic
+        run: |
+          cline auth --provider anthropic \
+            --apikey "${{ secrets.ANTHROPIC_API_KEY }}" \
+            --modelid claude-haiku-4-5-20251001
+
+      - name: Get PR context
+        id: context
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          # Create context directory
+          mkdir -p /tmp/pr-review
+
+          # Get PR number from issue_comment event (PRs are treated as issues)
+          PR_NUMBER=${{ github.event.issue.number }}
+
+          # Get PR diff
+          echo "Fetching PR diff..."
+          gh pr diff ${PR_NUMBER} > /tmp/pr-review/diff.txt
+          test -s /tmp/pr-review/diff.txt || { echo "Error: Failed to get PR diff"; exit 1; }
+
+          # Get PR info (including author for later use)
+          echo "Fetching PR info..."
+          gh pr view ${PR_NUMBER} --json title,body,files,author > /tmp/pr-review/pr_info.json
+          test -s /tmp/pr-review/pr_info.json || { echo "Error: Failed to get PR info"; exit 1; }
+
+          # Get head commit SHA for inline comments
+          echo "Fetching head commit SHA..."
+          gh pr view ${PR_NUMBER} --json headRefOid -q .headRefOid > /tmp/pr-review/head_sha.txt
+          test -s /tmp/pr-review/head_sha.txt || { echo "Error: Failed to get head SHA"; exit 1; }
+
+          # Extract PR title and author for environment variables
+          PR_TITLE=$(gh pr view ${PR_NUMBER} --json title -q .title)
+          PR_AUTHOR=$(gh pr view ${PR_NUMBER} --json author -q .author.login)
+
+          # Set outputs for use in subsequent steps
+          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "pr_title=${PR_TITLE}" >> $GITHUB_OUTPUT
+          echo "pr_author=${PR_AUTHOR}" >> $GITHUB_OUTPUT
+
+          echo "PR context files created successfully"
+          ls -la /tmp/pr-review/
+
+      - name: Review PR with Cline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+          PR_AUTHOR: ${{ steps.context.outputs.pr_author }}
+          PR_TITLE: ${{ steps.context.outputs.pr_title }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_DIFF_FILE: /tmp/pr-review/diff.txt
+          PR_INFO_FILE: /tmp/pr-review/pr_info.json
+          PR_HEAD_SHA_FILE: /tmp/pr-review/head_sha.txt
+          CLINE_COMMAND_PERMISSIONS: |
+            {
+              "allow": [
+                "gh pr diff *",
+                "gh pr view *",
+                "gh pr comment *",
+                "gh api repos/${{ github.repository }}/pulls/${{ steps.context.outputs.pr_number }}/comments *"
+              ]
+            }
+        run: |
+          cline --yolo "You are a code reviewer for the ${GITHUB_REPOSITORY} repository.
+
+          ## Your Task
+          Review PR #${PR_NUMBER} titled '${PR_TITLE}' by @${PR_AUTHOR}.
+
+          ## Context Files
+          The following files contain PR context - READ THEM FIRST:
+          - **PR Diff**: ${PR_DIFF_FILE} - Contains the full diff of changes
+          - **PR Info**: ${PR_INFO_FILE} - Contains PR metadata (title, body, files changed) as JSON
+          - **Head SHA**: ${PR_HEAD_SHA_FILE} - Contains the commit SHA needed for inline comments
+
+          ## Instructions
+
+          1. **Read the context files** using the Read tool to understand what changed.
+
+          2. **Analyze the changes**: Understand what the PR is doing and why.
+
+          3. **Look for issues**: Check for bugs, security vulnerabilities, performance concerns, code quality issues, missing error handling, and potential edge cases.
+
+          4. **Post inline comments** on specific lines where you have concerns. First read the head SHA from ${PR_HEAD_SHA_FILE}, then use:
+             \`\`\`bash
+             gh api repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments \\
+               -f body=\"Your comment here\" \\
+               -f path=\"path/to/file.ts\" \\
+               -f commit_id=\"<SHA from head_sha.txt>\" \\
+               -f side=\"RIGHT\" \\
+               -F line=<line_number>
+             \`\`\`
+
+          5. **Post a summary comment** on the PR after reviewing:
+             \`\`\`bash
+             gh pr comment ${PR_NUMBER} --body \"Your summary here\"
+             \`\`\`
+
+          ## Guidelines
+          - Be constructive and helpful, not nitpicky
+          - Focus on substantive issues, not style (we have linters)
+          - Thank the author for their contribution
+          - Keep comments concise and actionable
+          - Only comment where there are genuine concerns
+          - If the PR looks good, just post a brief positive summary
+
+          ## Important
+          - You MUST read the context files first before reviewing
+          - You MUST post at least a summary comment on the PR using gh pr comment
+          - Use gh CLI commands for GitHub interactions (GH_TOKEN is configured)
+          - Do NOT approve or request changes - just leave comments"
