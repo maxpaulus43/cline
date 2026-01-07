@@ -27,17 +27,19 @@ cd cli
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
+echo "hello"
+
 # Normalize architecture names
 case "$ARCH" in
-    x86_64)
-        ARCH="amd64"
-        ;;
-    aarch64)
-        ARCH="arm64"
-        ;;
-    arm64)
-        ARCH="arm64"
-        ;;
+x86_64)
+    ARCH="amd64"
+    ;;
+aarch64)
+    ARCH="arm64"
+    ;;
+arm64)
+    ARCH="arm64"
+    ;;
 esac
 
 # Build for current platform only
