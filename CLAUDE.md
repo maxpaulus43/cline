@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Updated the Claude.MD markdown file
+
 This file is the secret sauce for working effectively in this codebase. It captures tribal knowledge—the nuanced, non-obvious patterns that make the difference between a quick fix and hours of back-and-forth & human intervention.
 
 **When to add to this file:**
